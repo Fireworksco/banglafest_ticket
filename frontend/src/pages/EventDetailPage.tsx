@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, MapPin, ArrowLeft, Minus, Plus, Tag, CheckCircle, XCircle, User, Check, Info } from "lucide-react";
+import { CalendarDays, MapPin, ArrowLeft, Minus, Plus, Tag, CheckCircle, XCircle, User, Check, Info, Clock } from "lucide-react";
+import { getBookingState } from "../lib/booking";
+import { EventCover } from "../components/EventCover";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 import { eventsApi } from "../api/events";
@@ -90,6 +92,13 @@ export function EventDetailPage() {
   });
 
   const event = data?.event;
+
+  // Old links use the event ID; show the slug in the address bar instead
+  useEffect(() => {
+    if (event?.slug && id !== event.slug) {
+      navigate(`/events/${event.slug}`, { replace: true });
+    }
+  }, [event?.slug, id, navigate]);
 
   const handleQuantityChange = (tierId: string, newQty: number, tier: any) => {
     if (newQty < 0) return;
@@ -216,6 +225,9 @@ export function EventDetailPage() {
     </div>
   );
 
+  const booking = getBookingState(event);
+  const canBook = booking.kind === "open";
+
   // Attendee name step — shown after order creation
   if (pendingCheckout) {
     return (
@@ -284,21 +296,36 @@ export function EventDetailPage() {
       </button>
 
       {event.imageUrl && (
-        <div className="relative h-56 sm:h-72 rounded-2xl overflow-hidden mb-8">
-          <img src={event.imageUrl} alt={event.title} className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-gray-950/70 to-transparent" />
-        </div>
+        <EventCover
+          imageUrl={event.imageUrl}
+          mobileImageUrl={event.mobileImageUrl}
+          alt={event.title}
+          className="rounded-2xl mb-8"
+        />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Event info */}
         <div className="lg:col-span-2 space-y-6">
-          {!event.isActive && (
+          {booking.kind === "closed" && (
             <div className="card border border-red-500/20 bg-red-950/10 p-4 flex items-center gap-3">
               <XCircle className="w-6 h-6 text-red-400 shrink-0" />
               <div>
                 <p className="font-semibold text-red-400 text-sm">Booking Closed</p>
                 <p className="text-xs text-gray-400">Ticket sales for this event are currently inactive or closed.</p>
+              </div>
+            </div>
+          )}
+          {(booking.kind === "soon" || booking.kind === "upcoming") && (
+            <div className="card border border-amber-500/30 bg-amber-950/20 p-4 flex items-center gap-3">
+              <Clock className="w-6 h-6 text-amber-300 shrink-0" />
+              <div>
+                <p className="font-semibold text-amber-300 text-sm">{booking.label}</p>
+                <p className="text-xs text-gray-400">
+                  {booking.kind === "soon"
+                    ? "Ticket sales haven't opened yet. Check back soon."
+                    : "All times are UK time. Come back then to book your tickets."}
+                </p>
               </div>
             </div>
           )}
@@ -350,7 +377,7 @@ export function EventDetailPage() {
                        className={`rounded-xl border p-4 transition-all ${
                          selectedQty > 0
                            ? "border-primary-500 bg-primary-950"
-                           : isSoldOut || !event.isActive
+                           : isSoldOut || !canBook
                            ? "border-gray-800 bg-gray-900 opacity-50"
                            : "border-gray-800 bg-gray-900"
                        }`}
@@ -387,8 +414,10 @@ export function EventDetailPage() {
                           Max {tier.maxPerPerson} per person
                         </div>
 
-                        {!event.isActive ? (
+                        {booking.kind === "closed" ? (
                           <span className="text-red-400 font-semibold text-xs bg-red-950/40 border border-red-900/40 px-2 py-1 rounded">Booking Closed</span>
+                        ) : !canBook ? (
+                          <span className="text-amber-300 font-semibold text-xs bg-amber-950/40 border border-amber-800/60 px-2 py-1 rounded">Coming Soon</span>
                         ) : isSoldOut ? (
                           <span className="text-red-400 font-semibold text-sm">SOLD OUT</span>
                         ) : (

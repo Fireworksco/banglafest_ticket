@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
+import { isUuid } from '../lib/slug';
 
 // GET /api/events
 export async function listEvents(_req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -45,9 +46,10 @@ export async function listEvents(_req: Request, res: Response, next: NextFunctio
 // GET /api/events/:id
 export async function getEvent(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    // Accepts a slug or an event ID, so old ID links keep working
     const { id } = req.params;
     const event = await prisma.event.findUnique({
-      where: { id },
+      where: isUuid(id) ? { id } : { slug: id.toLowerCase() },
       include: {
         ticketTiers: {
           select: {

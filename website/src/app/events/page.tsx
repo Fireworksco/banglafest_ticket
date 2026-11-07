@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
 
@@ -21,12 +20,14 @@ type SpecialAddition = {
 
 type EventItem = {
   id: string;
+  slug?: string | null;
   title: string;
   description: string;
   startTime: string;
   endTime: string;
   location: string;
   imageUrl: string | null;
+  mobileImageUrl?: string | null;
   performers: Performer[];
   specialAdditions: SpecialAddition[];
   ticketTiers: TicketTier[];
@@ -103,17 +104,25 @@ export default async function EventsPage() {
             {events.map((event) => (
               <article key={event.id} className="section-shell overflow-hidden rounded-[2rem]">
                 <div>
-                  <div className="relative aspect-[1286/486] min-h-[14rem] bg-black/20">
+                  {/* 16:9 cover (1920x1080); phones use the 4:5 mobile cover (1080x1350) when set.
+                      object-contain so the whole poster is always visible. */}
+                  <div
+                    className={`relative mx-auto max-h-[42rem] w-full bg-black ${
+                      event.imageUrl && event.mobileImageUrl ? "aspect-[4/5] md:aspect-video" : "aspect-video"
+                    }`}
+                  >
                     {event.imageUrl ? (
-                      <>
-                        <Image
+                      <picture>
+                        {event.mobileImageUrl && (
+                          <source media="(max-width: 767px)" srcSet={event.mobileImageUrl} />
+                        )}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
                           src={event.imageUrl}
                           alt={event.title}
-                          fill
-                          unoptimized
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-contain"
                         />
-                      </>
+                      </picture>
                     ) : (
                       <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(189,38,53,0.28),rgba(17,94,89,0.2))]" />
                     )}
@@ -154,7 +163,7 @@ export default async function EventsPage() {
 
                         <div className="mt-6 flex flex-wrap gap-4">
                           <a
-                            href={`https://ticket.banglafest.co.uk/events/${event.id}`}
+                            href={`https://ticket.banglafest.co.uk/events/${event.slug ?? event.id}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="rounded-full border border-[#f18da7]/40 bg-[#bd2635] px-6 py-3 text-sm font-bold text-white shadow-[0_0_30px_rgba(189,38,53,0.28)] hover:-translate-y-0.5 hover:bg-[#a61d2b]"

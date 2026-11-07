@@ -32,16 +32,20 @@ model User {
 model Event {
   id               String       @id @default(uuid())
   title            String
+  slug             String?      @unique
   description      String?
   startTime        DateTime     @map("start_time")
   endTime          DateTime     @map("end_time")
   location         String?
   createdBy        String?      @map("created_by")
   createdAt        DateTime     @default(now()) @map("created_at")
-  imageUrl         String?      @map("image_url")
+  imageUrl         String?      @map("image_url")        // 1920x1080 (16:9)
+  mobileImageUrl   String?      @map("mobile_image_url") // 1080x1350 (4:5), shown on phones
   performers       String?      // JSON: [{name, ticketDisplayName}]
   specialAdditions String?      @map("special_additions") // JSON: [{name, description, ticketDisplayText}]
   isActive         Boolean      @default(true) @map("is_active")
+  bookingOpensAt   DateTime?    @map("booking_opens_at")  // null = "Tickets available soon"
+  bookingClosesAt  DateTime?    @map("booking_closes_at") // null = no automatic close
   creator          User?        @relation("EventCreatedBy", fields: [createdBy], references: [id])
   ticketTiers      TicketTier[]
   promoCodes  PromoCodeEvent[]

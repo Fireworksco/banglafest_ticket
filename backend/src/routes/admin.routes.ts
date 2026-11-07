@@ -48,6 +48,26 @@ router.use(authenticate, authorize('ADMIN'));
  *             properties:
  *               title:
  *                 type: string
+ *               slug:
+ *                 type: string
+ *                 description: URL name for the event page (a-z, 0-9, dashes). Built from the title if empty.
+ *                 example: banglafest-2026
+ *               imageUrl:
+ *                 type: string
+ *                 description: Cover image, recommended 1920x1080 px (16:9).
+ *               mobileImageUrl:
+ *                 type: string
+ *                 description: Cover image for phones, recommended 1080x1350 px (4:5). Falls back to imageUrl.
+ *               bookingOpensAt:
+ *                 type: string
+ *                 format: date-time
+ *                 nullable: true
+ *                 description: When online ticket sales open. Empty = "Tickets available soon" (no online sales).
+ *               bookingClosesAt:
+ *                 type: string
+ *                 format: date-time
+ *                 nullable: true
+ *                 description: When online ticket sales close. Empty = no automatic close.
  *               description:
  *                 type: string
  *               startTime:
@@ -61,6 +81,8 @@ router.use(authenticate, authorize('ADMIN'));
  *     responses:
  *       201:
  *         description: Event created
+ *       409:
+ *         description: Slug already in use
  */
 router.post(
   '/events',
@@ -87,9 +109,28 @@ router.post(
  *         required: true
  *         schema:
  *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               slug:
+ *                 type: string
+ *                 description: New URL name. Send an empty string to clear it.
+ *               bookingOpensAt:
+ *                 type: string
+ *                 format: date-time
+ *                 nullable: true
+ *               bookingClosesAt:
+ *                 type: string
+ *                 format: date-time
+ *                 nullable: true
  *     responses:
  *       200:
  *         description: Event updated
+ *       409:
+ *         description: Slug already in use
  */
 router.put('/events/:id', updateEvent);
 

@@ -4,6 +4,7 @@ import prisma from '../lib/prisma';
 import { AuthRequest } from '../middleware/authenticate';
 import { sendTicketConfirmationEmail } from '../services/email.service';
 import { generateTicketPdf } from '../services/pdf.service';
+import { bookingBlockReason } from '../lib/booking';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2024-04-10' });
 
@@ -16,6 +17,21 @@ export async function createOrder(req: AuthRequest, res: Response, next: NextFun
 
     if (!tierId || !quantity || quantity < 1) {
       res.status(400).json({ error: 'tierId and a valid quantity are required.' });
+      return;
+    }
+
+    // Online orders are only allowed inside the event's booking window
+    const tierWithEvent = await prisma.ticketTier.findUnique({
+      where: { id: tierId },
+      select: { event: { select: { isActive: true, bookingOpensAt: true, bookingClosesAt: true } } },
+    });
+    if (!tierWithEvent) {
+      res.status(404).json({ error: 'Ticket tier not found.' });
+      return;
+    }
+    const blocked = bookingBlockReason(tierWithEvent.event);
+    if (blocked) {
+      res.status(400).json({ error: blocked });
       return;
     }
 
