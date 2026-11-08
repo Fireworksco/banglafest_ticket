@@ -105,7 +105,11 @@ app.use(errorHandler);
 // ─── Start Server & Background Jobs ───────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  startExpireOrdersJob();
+  if (process.env.DISABLE_ORDER_EXPIRY_JOB !== 'true') {
+    startExpireOrdersJob();
+  } else {
+    console.log('[CronJob] Order expiry job disabled (DISABLE_ORDER_EXPIRY_JOB=true)');
+  }
 });
 
 export default app;

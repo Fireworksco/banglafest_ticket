@@ -44,12 +44,16 @@ export interface TicketTier {
 
 export interface Event {
   id: string;
+  slug?: string | null;
+  bookingOpensAt?: string | null;
+  bookingClosesAt?: string | null;
   title: string;
   description: string;
   startTime: string;
   endTime: string;
   location: string;
   imageUrl?: string;
+  mobileImageUrl?: string | null;
   performers?: Performer[];
   specialAdditions?: SpecialAddition[];
   ticketTiers: TicketTier[];

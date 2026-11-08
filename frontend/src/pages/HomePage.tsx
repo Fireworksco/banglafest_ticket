@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { CalendarDays, MapPin, Ticket } from 'lucide-react';
+import { CalendarDays, MapPin, Ticket, Clock } from 'lucide-react';
 import { eventsApi } from '../api/events';
+import { getBookingState } from '../lib/booking';
+import { EventCover } from '../components/EventCover';
 import { PageSpinner } from '../components/ui/Spinner';
 // import { AvailabilityBadge } from '../components/ui/Badge';
 
@@ -70,27 +72,32 @@ export function HomePage() {
               ? Math.min(...event.ticketTiers.map((t) => t.price))
               : null;
             const allSoldOut = event.ticketTiers.length > 0 && event.ticketTiers.every((t) => t.availabilityStatus === 'SOLD_OUT');
+            const booking = getBookingState(event);
+            const notOnSaleYet = booking.kind === 'soon' || booking.kind === 'upcoming';
 
             return (
               <Link
                 key={event.id}
-                to={`/events/${event.id}`}
+                to={`/events/${event.slug ?? event.id}`}
                 className="card hover:border-primary-700 transition-all group flex flex-col overflow-hidden p-0"
               >
                 {event.imageUrl ? (
-                  <div className="relative h-44 overflow-hidden">
-                    <img
-                      src={event.imageUrl}
-                      alt={event.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-gray-950/80 to-transparent" />
-                    {!event.isActive ? (
+                  <EventCover
+                    imageUrl={event.imageUrl}
+                    mobileImageUrl={event.mobileImageUrl}
+                    alt={event.title}
+                    imgClassName="group-hover:scale-105 transition-transform duration-300"
+                  >
+                    {/* Light fade at the very bottom only, so the poster stays readable */}
+                    <div className="absolute inset-x-0 bottom-0 h-1/6 bg-gradient-to-t from-gray-950/60 to-transparent" />
+                    {booking.kind === 'closed' ? (
                       <span className="absolute top-3 right-3 bg-red-950/90 text-red-400 border border-red-850 px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-widest">Booking Closed</span>
+                    ) : notOnSaleYet ? (
+                      <span className="absolute top-3 right-3 bg-amber-950/90 text-amber-300 border border-amber-800 px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-widest">Coming Soon</span>
                     ) : allSoldOut ? (
                       <span className="absolute top-3 right-3 badge-sold-out">Sold Out</span>
                     ) : null}
-                  </div>
+                  </EventCover>
                 ) : (
                   <div className="h-2 bg-gradient-to-r from-primary-700 to-primary-500 rounded-t-xl" />
                 )}
@@ -123,12 +130,21 @@ export function HomePage() {
                     )}
                   </div>
 
+                  {notOnSaleYet && (
+                    <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-800/60 bg-amber-950/40 px-3 py-2 text-sm font-semibold text-amber-300">
+                      <Clock className="w-4 h-4 mt-0.5 shrink-0" />
+                      <span>{booking.label}</span>
+                    </div>
+                  )}
+
                   <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
                     <span className="text-white font-semibold">
                       {minPrice !== null ? `From £${minPrice.toFixed(2)}` : event.ticketTiers.length === 0 ? 'Tickets TBA' : 'Free'}
                     </span>
-                    {!event.isActive ? (
+                    {booking.kind === 'closed' ? (
                       <span className="text-xs font-bold uppercase tracking-wider text-red-400 bg-red-950/40 border border-red-900/40 px-2.5 py-1.5 rounded-lg">Booking Closed</span>
+                    ) : notOnSaleYet ? (
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-300 bg-amber-950/40 border border-amber-800/60 px-2.5 py-1.5 rounded-lg">Coming Soon</span>
                     ) : event.ticketTiers.length === 0 ? (
                       <span className="text-xs text-gray-500 font-medium">Coming Soon</span>
                     ) : allSoldOut ? (

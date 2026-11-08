@@ -30,6 +30,10 @@ const router = Router();
  *                       title:
  *                         type: string
  *                         example: Banglafest 2026
+ *                       slug:
+ *                         type: string
+ *                         nullable: true
+ *                         example: banglafest-2026
  *                       description:
  *                         type: string
  *                         example: Annual festival celebration
@@ -95,9 +99,8 @@ router.get('/', listEvents);
  *         required: true
  *         schema:
  *           type: string
- *           format: uuid
- *         description: Event ID
- *         example: 550e8400-e29b-41d4-a716-446655440000
+ *         description: Event slug (e.g. banglafest-2026) or event ID (UUID)
+ *         example: banglafest-2026
  *     responses:
  *       200:
  *         description: Event details retrieved successfully
@@ -116,6 +119,16 @@ router.get('/', listEvents);
  *                     title:
  *                       type: string
  *                       example: Banglafest 2026
+ *                     slug:
+ *                       type: string
+ *                       nullable: true
+ *                       example: banglafest-2026
+ *                     imageUrl:
+ *                       type: string
+ *                       nullable: true
+ *                     mobileImageUrl:
+ *                       type: string
+ *                       nullable: true
  *                     description:
  *                       type: string
  *                       example: Annual festival celebration

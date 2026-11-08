@@ -7,14 +7,20 @@ import { adminApi } from "../../api/admin";
 import { eventsApi } from "../../api/events";
 import { PageSpinner } from "../../components/ui/Spinner";
 import type { Event, Performer, SpecialAddition } from "../../types";
+import { getBookingState, isoToUkInput, ukInputToIso } from "../../lib/booking";
+import { COVER_SIZE_HINT, MOBILE_COVER_SIZE_HINT } from "../../components/EventCover";
 
 type EventForm = {
   title: string;
+  slug: string;
+  bookingOpensAt: string;  // UK time, "YYYY-MM-DDTHH:mm" or ""
+  bookingClosesAt: string; // UK time, "YYYY-MM-DDTHH:mm" or ""
   description: string;
   startTime: string;
   endTime: string;
   location: string;
   imageUrl: string;
+  mobileImageUrl: string;
   performers: Performer[];
   specialAdditions: SpecialAddition[];
 };
@@ -29,13 +35,35 @@ type TierForm = {
   promoDiscountAmount: string;
 };
 
+// Same rules as the backend: lowercase a-z, 0-9 and single dashes
+const toSlug = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 100);
+
+// Booking times are typed in UK time; send them to the API as real timestamps
+const toPayload = (f: EventForm) => ({
+  ...f,
+  bookingOpensAt: ukInputToIso(f.bookingOpensAt),
+  bookingClosesAt: ukInputToIso(f.bookingClosesAt),
+});
+
 const emptyEvent: EventForm = {
   title: "",
+  slug: "",
+  bookingOpensAt: "",
+  bookingClosesAt: "",
   description: "",
   startTime: "",
   endTime: "",
   location: "",
   imageUrl: "",
+  mobileImageUrl: "",
   performers: [],
   specialAdditions: [],
 };
@@ -59,6 +87,8 @@ export function AdminEventsPage() {
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [showEventForm, setShowEventForm] = useState(false);
   const [eventForm, setEventForm] = useState<EventForm>(emptyEvent);
+  // While false, the slug follows the title as it is typed
+  const [slugEdited, setSlugEdited] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tierForms, setTierForms] = useState<Record<string, TierForm>>({});
   const [currentFeature, setCurrentFeature] = useState("");
@@ -79,7 +109,7 @@ export function AdminEventsPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (d: EventForm) => adminApi.createEvent(d),
+    mutationFn: (d: EventForm) => adminApi.createEvent(toPayload(d)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["events"] });
       toast.success("Event created");
@@ -88,15 +118,21 @@ export function AdminEventsPage() {
       setCurrentPerformer({ name: "", ticketDisplayName: "" });
       setCurrentSpecial({ name: "", description: "", ticketDisplayText: "" });
     },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error || "Failed to create event");
+    },
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: EventForm }) => adminApi.updateEvent(id, data),
+    mutationFn: ({ id, data }: { id: string; data: EventForm }) => adminApi.updateEvent(id, toPayload(data)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["events"] });
       toast.success("Event updated");
       setEditingEvent(null);
       setShowEventForm(false);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.error || "Failed to update event");
     },
   });
 
@@ -167,6 +203,10 @@ export function AdminEventsPage() {
       toast.error("End time must be after start time");
       return;
     }
+    if (eventForm.bookingOpensAt && eventForm.bookingClosesAt && eventForm.bookingClosesAt <= eventForm.bookingOpensAt) {
+      toast.error("Booking close time must be after booking open time");
+      return;
+    }
 
     if (editingEvent) {
       updateMutation.mutate({ id: editingEvent.id, data: eventForm });
@@ -216,13 +256,19 @@ export function AdminEventsPage() {
 
   const openEditEvent = (event: Event) => {
     setEditingEvent(event);
+    // Existing events keep their slug when the title changes
+    setSlugEdited(true);
     setEventForm({
       title: event.title,
+      slug: event.slug || "",
+      bookingOpensAt: isoToUkInput(event.bookingOpensAt),
+      bookingClosesAt: isoToUkInput(event.bookingClosesAt),
       description: event.description || "",
       startTime: event.startTime.slice(0, 16),
       endTime: event.endTime.slice(0, 16),
       location: event.location || "",
       imageUrl: event.imageUrl || "",
+      mobileImageUrl: event.mobileImageUrl || "",
       performers: event.performers ? [...event.performers] : [],
       specialAdditions: event.specialAdditions ? [...event.specialAdditions] : [],
     });
@@ -306,6 +352,7 @@ export function AdminEventsPage() {
             setShowEventForm(true);
             setEditingEvent(null);
             setEventForm(emptyEvent);
+            setSlugEdited(false);
             setCurrentPerformer({ name: "", ticketDisplayName: "" });
             setCurrentSpecial({ name: "", description: "", ticketDisplayText: "" });
           }}
@@ -323,10 +370,32 @@ export function AdminEventsPage() {
                 <label className="label">Title *</label>
                 <input 
                   className="input" 
-                  value={eventForm.title} 
-                  onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })} 
-                  required 
+                  value={eventForm.title}
+                  onChange={(e) =>
+                    setEventForm({
+                      ...eventForm,
+                      title: e.target.value,
+                      ...(!slugEdited && { slug: toSlug(e.target.value) }),
+                    })
+                  }
+                  required
                 />
+              </div>
+              <div>
+                <label className="label">Event Slug</label>
+                <input
+                  className="input"
+                  value={eventForm.slug}
+                  placeholder="e.g. banglafest-2026"
+                  onChange={(e) => {
+                    setSlugEdited(true);
+                    setEventForm({ ...eventForm, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") });
+                  }}
+                  onBlur={() => setEventForm({ ...eventForm, slug: toSlug(eventForm.slug) })}
+                />
+                <p className="text-xs text-gray-400 mt-1 break-all">
+                  Page URL: /events/{toSlug(eventForm.slug) || (editingEvent ? editingEvent.id : "built-from-title")}
+                </p>
               </div>
               <div>
                 <label className="label">Location</label>
@@ -351,10 +420,32 @@ export function AdminEventsPage() {
                 <input 
                   type="datetime-local" 
                   className="input" 
-                  value={eventForm.endTime} 
-                  onChange={(e) => setEventForm({ ...eventForm, endTime: e.target.value })} 
-                  required 
+                  value={eventForm.endTime}
+                  onChange={(e) => setEventForm({ ...eventForm, endTime: e.target.value })}
+                  required
                 />
+              </div>
+              <div>
+                <label className="label">Booking Opens (UK time)</label>
+                <input
+                  type="datetime-local"
+                  className="input"
+                  value={eventForm.bookingOpensAt}
+                  onChange={(e) => setEventForm({ ...eventForm, bookingOpensAt: e.target.value })}
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Leave empty to show "Tickets available soon" (no online sales).
+                </p>
+              </div>
+              <div>
+                <label className="label">Booking Closes (UK time)</label>
+                <input
+                  type="datetime-local"
+                  className="input"
+                  value={eventForm.bookingClosesAt}
+                  onChange={(e) => setEventForm({ ...eventForm, bookingClosesAt: e.target.value })}
+                />
+                <p className="text-xs text-gray-400 mt-1">Optional. Online sales stop automatically at this time.</p>
               </div>
             </div>
             <div>
@@ -366,22 +457,45 @@ export function AdminEventsPage() {
                 onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
               />
             </div>
-            <div>
-              <label className="label">Cover Image URL (optional)</label>
-              <input
-                className="input"
-                placeholder="https://example.com/image.jpg"
-                value={eventForm.imageUrl}
-                onChange={(e) => setEventForm({ ...eventForm, imageUrl: e.target.value })}
-              />
-              {eventForm.imageUrl && (
-                <img
-                  src={eventForm.imageUrl}
-                  alt="Preview"
-                  className="mt-2 h-24 w-full object-cover rounded-lg"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Cover Image URL (optional)</label>
+                <input
+                  className="input"
+                  placeholder="https://example.com/cover.jpg"
+                  value={eventForm.imageUrl}
+                  onChange={(e) => setEventForm({ ...eventForm, imageUrl: e.target.value })}
                 />
-              )}
+                <p className="text-xs text-gray-400 mt-1">{COVER_SIZE_HINT}</p>
+                {eventForm.imageUrl && (
+                  // Preview in the same 16:9 shape the website uses
+                  <img
+                    src={eventForm.imageUrl}
+                    alt="Cover preview"
+                    className="mt-2 aspect-video w-full object-contain bg-gray-950 rounded-lg"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
+              </div>
+              <div>
+                <label className="label">Mobile Cover Image URL (optional)</label>
+                <input
+                  className="input"
+                  placeholder="https://example.com/cover-mobile.jpg"
+                  value={eventForm.mobileImageUrl}
+                  onChange={(e) => setEventForm({ ...eventForm, mobileImageUrl: e.target.value })}
+                />
+                <p className="text-xs text-gray-400 mt-1">{MOBILE_COVER_SIZE_HINT}</p>
+                {eventForm.mobileImageUrl && (
+                  // Preview in the same 4:5 shape phones use
+                  <img
+                    src={eventForm.mobileImageUrl}
+                    alt="Mobile cover preview"
+                    className="mt-2 aspect-[4/5] w-40 object-contain bg-gray-950 rounded-lg"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
+              </div>
             </div>
 
             {/* Performers */}
@@ -507,7 +621,9 @@ export function AdminEventsPage() {
                     <p className="text-sm text-gray-400">
                       {format(new Date(event.startTime), "MMM d, yyyy")} • {event.location}
                     </p>
-                    <p className="text-xs text-gray-500 mt-1">{event.ticketTiers.length} tier(s)</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {event.ticketTiers.length} tier(s) • Website shows: {getBookingState(event).label}
+                    </p>
                   </div>
                   <div className="flex items-center gap-3">
                     {/* Active/Inactive Toggle Button */}

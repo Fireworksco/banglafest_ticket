@@ -7,15 +7,55 @@ import {
   sendTicketConfirmationEmail,
 } from '../services/email.service';
 import { generateTicketPdf } from '../services/pdf.service';
+import { slugify, isUuid } from '../lib/slug';
+import { parseOptionalDate } from '../lib/booking';
+
+// Validates the optional booking window. Returns an error message or null.
+function readBookingWindow(
+  body: { bookingOpensAt?: unknown; bookingClosesAt?: unknown },
+  current?: { bookingOpensAt: Date | null; bookingClosesAt: Date | null }
+): { opens?: Date | null; closes?: Date | null; error?: string } {
+  let opens: Date | null | undefined;
+  let closes: Date | null | undefined;
+  try {
+    opens = parseOptionalDate(body.bookingOpensAt);
+    closes = parseOptionalDate(body.bookingClosesAt);
+  } catch {
+    return { error: 'Invalid booking date.' };
+  }
+  const finalOpens = opens === undefined ? current?.bookingOpensAt ?? null : opens;
+  const finalCloses = closes === undefined ? current?.bookingClosesAt ?? null : closes;
+  if (finalOpens && finalCloses && finalCloses <= finalOpens) {
+    return { error: 'Booking close time must be after booking open time.' };
+  }
+  return { opens, closes };
+}
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2024-04-10' });
 
 // ─── Event Management ─────────────────────────────────────────────────────────
 
+const SLUG_IN_USE = 'Slug already in use. Please choose another.';
+
+function isUniqueConflict(err: unknown): boolean {
+  return (err as { code?: string })?.code === 'P2002';
+}
+
+// Find a free slug based on `base` by adding -2, -3, ... when needed.
+async function uniqueSlugFrom(base: string): Promise<string> {
+  const root = base || 'event';
+  for (let i = 1; i < 1000; i++) {
+    const candidate = i === 1 ? root : `${root}-${i}`;
+    const taken = await prisma.event.findUnique({ where: { slug: candidate }, select: { id: true } });
+    if (!taken) return candidate;
+  }
+  return `${root}-${Date.now()}`;
+}
+
 // POST /api/admin/events
 export async function createEvent(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { title, description, startTime, endTime, location, imageUrl, performers, specialAdditions } = req.body;
+    const { title, slug, description, startTime, endTime, location, imageUrl, mobileImageUrl, performers, specialAdditions } = req.body;
 
     if (!title || !String(title).trim()) {
       res.status(400).json({ error: 'Title is required.' });
@@ -36,14 +76,41 @@ export async function createEvent(req: AuthRequest, res: Response, next: NextFun
       return;
     }
 
+    const booking = readBookingWindow(req.body);
+    if (booking.error) {
+      res.status(400).json({ error: booking.error });
+      return;
+    }
+
+    // Use the given slug, or build one from the title when left empty
+    const requestedSlug = slug ? slugify(slug) : '';
+    if (requestedSlug && isUuid(requestedSlug)) {
+      res.status(400).json({ error: 'Slug cannot look like an ID. Please use words.' });
+      return;
+    }
+    let finalSlug = requestedSlug;
+    if (requestedSlug) {
+      const taken = await prisma.event.findUnique({ where: { slug: requestedSlug }, select: { id: true } });
+      if (taken) {
+        res.status(409).json({ error: SLUG_IN_USE });
+        return;
+      }
+    } else {
+      finalSlug = await uniqueSlugFrom(slugify(title));
+    }
+
     const event = await prisma.event.create({
       data: {
         title,
+        slug: finalSlug,
+        bookingOpensAt: booking.opens ?? null,
+        bookingClosesAt: booking.closes ?? null,
         description,
         startTime: new Date(startTime),
         endTime: new Date(endTime),
         location,
         imageUrl: imageUrl || null,
+        mobileImageUrl: mobileImageUrl || null,
         createdBy: req.user!.id,
         performers:       performers?.length       ? JSON.stringify(performers)       : null,
         specialAdditions: specialAdditions?.length ? JSON.stringify(specialAdditions) : null,
@@ -52,6 +119,10 @@ export async function createEvent(req: AuthRequest, res: Response, next: NextFun
 
     res.status(201).json({ event });
   } catch (err) {
+    if (isUniqueConflict(err)) {
+      res.status(409).json({ error: SLUG_IN_USE });
+      return;
+    }
     next(err);
   }
 }
@@ -60,7 +131,7 @@ export async function createEvent(req: AuthRequest, res: Response, next: NextFun
 export async function updateEvent(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
     const { id } = req.params;
-    const { title, description, startTime, endTime, location, imageUrl, performers, specialAdditions, isActive } = req.body;
+    const { title, slug, description, startTime, endTime, location, imageUrl, mobileImageUrl, performers, specialAdditions, isActive } = req.body;
 
     const existing = await prisma.event.findUnique({ where: { id } });
     if (!existing) {
@@ -68,15 +139,42 @@ export async function updateEvent(req: AuthRequest, res: Response, next: NextFun
       return;
     }
 
+    const booking = readBookingWindow(req.body, existing);
+    if (booking.error) {
+      res.status(400).json({ error: booking.error });
+      return;
+    }
+
+    // slug: undefined = leave as is, empty = clear (links fall back to the ID)
+    let newSlug: string | null | undefined;
+    if (slug !== undefined) {
+      newSlug = slug ? slugify(slug) || null : null;
+      if (newSlug && isUuid(newSlug)) {
+        res.status(400).json({ error: 'Slug cannot look like an ID. Please use words.' });
+        return;
+      }
+      if (newSlug && newSlug !== existing.slug) {
+        const taken = await prisma.event.findUnique({ where: { slug: newSlug }, select: { id: true } });
+        if (taken && taken.id !== id) {
+          res.status(409).json({ error: SLUG_IN_USE });
+          return;
+        }
+      }
+    }
+
     const event = await prisma.event.update({
       where: { id },
       data: {
         ...(title && { title }),
+        ...(newSlug !== undefined && { slug: newSlug }),
+        ...(booking.opens !== undefined && { bookingOpensAt: booking.opens }),
+        ...(booking.closes !== undefined && { bookingClosesAt: booking.closes }),
         ...(description !== undefined && { description }),
         ...(startTime && { startTime: new Date(startTime) }),
         ...(endTime && { endTime: new Date(endTime) }),
         ...(location !== undefined && { location }),
         ...(imageUrl !== undefined && { imageUrl: imageUrl || null }),
+        ...(mobileImageUrl !== undefined && { mobileImageUrl: mobileImageUrl || null }),
         ...(performers !== undefined && {
           performers: performers?.length ? JSON.stringify(performers) : null,
         }),
@@ -89,6 +187,10 @@ export async function updateEvent(req: AuthRequest, res: Response, next: NextFun
 
     res.json({ event });
   } catch (err) {
+    if (isUniqueConflict(err)) {
+      res.status(409).json({ error: SLUG_IN_USE });
+      return;
+    }
     next(err);
   }
 }
